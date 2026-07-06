@@ -39,10 +39,10 @@ body{
 /* ── ARCADE CABINET ── */
 .cabinet{
   position:relative;z-index:1;
-  width:min(480px,100vw);height:min(860px,100vh);
+  width:min(620px,100vw);height:100vh;height:100dvh;
   margin:0 auto;
   background:linear-gradient(160deg,#2a1250 0%,#150a2e 60%,#0a0518 100%);
-  border-radius:28px;
+  border-radius:0;
   padding:14px 14px 22px;
   box-shadow:
     0 0 0 3px rgba(0,229,255,.25),
@@ -50,8 +50,8 @@ body{
     inset 0 0 60px rgba(0,0,0,.6);
   display:flex;flex-direction:column;
 }
-@media (min-width:481px) and (min-height:861px){
-  .cabinet{border:6px solid #1c0f3a;}
+@media (min-width:640px){
+  .cabinet{border-radius:28px;height:min(1100px,96vh);height:min(1100px,96dvh);margin-top:2vh;}
 }
 .marquee{
   text-align:center;padding:6px 4px 10px;flex-shrink:0;
@@ -221,6 +221,7 @@ body{
           <button class="btn btn-ghost font-display" onclick="UI.go('scLeaderboard')"><span class="btn-badge">🏆</span> Leaderboard</button>
           <button class="btn btn-ghost font-display" id="soundToggleBtn" onclick="Audio2.toggle()"><span class="btn-badge">🔊</span> Sound: ON</button>
         </div>
+        <div style="text-align:center;color:rgba(255,255,255,.25);font-size:.65rem;margin-top:14px;letter-spacing:.5px;">Build 2026-07-06 · fullscreen + BGM + crystals + ranking</div>
       </div>
     </div>
 
@@ -377,11 +378,20 @@ const UI = {
    ══════════════════════════════════════════════ */
 const Audio2 = {
   ctx:null, enabled:true,
-  ensure(){ if(!this.ctx){ try{ this.ctx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } },
+  bgmTimer:null, bgmIdx:0, bgmOn:false,
+  ensure(){
+    if(!this.ctx){ try{ this.ctx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+    if(this.ctx && this.ctx.state==='suspended'){ this.ctx.resume().catch(()=>{}); }
+  },
   toggle(){
     this.enabled = !this.enabled;
     document.getElementById('soundToggleBtn').textContent = this.enabled ? '🔊 Sound: ON' : '🔇 Sound: OFF';
-    if(!this.enabled) speechSynthesis.cancel();
+    if(!this.enabled){
+      speechSynthesis.cancel();
+      this.stopMusic();
+    } else if(Game.running && !Game.paused){
+      this.startMusic();
+    }
   },
   tone(freq,dur,type,vol){
     if(!this.enabled) return;
@@ -401,6 +411,32 @@ const Audio2 = {
   click(){ this.tone(500,60,'square',.05); },
   missionDone(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>this.tone(f,150,'triangle',.09),i*80)); },
   heartPickup(){ [784,988].forEach((f,i)=>setTimeout(()=>this.tone(f,140,'sine',.09),i*90)); },
+
+  /* ── background music: driving arcade riff + bass pulse, synthesized, loops during gameplay ── */
+  BGM_LEAD:[294,349,392,440,392,349,330,294, 294,392,440,523,440,392,349,330],
+  BGM_BASS:[147,0,147,0,131,0,147,0, 147,0,175,0,131,0,147,0],
+  BGM_STEP_MS:165,
+  startMusic(){
+    if(!this.enabled || this.bgmOn) return;
+    this.ensure();
+    if(!this.ctx) return;
+    this.bgmOn = true;
+    this.bgmIdx = 0;
+    this._playBgmStep();
+  },
+  stopMusic(){
+    this.bgmOn = false;
+    if(this.bgmTimer){ clearTimeout(this.bgmTimer); this.bgmTimer=null; }
+  },
+  _playBgmStep(){
+    if(!this.bgmOn || !this.enabled) return;
+    const i = this.bgmIdx % this.BGM_LEAD.length;
+    this.tone(this.BGM_LEAD[i], 120, 'triangle', .10);
+    if(this.BGM_BASS[i]) this.tone(this.BGM_BASS[i], 140, 'square', .12);
+    this.bgmIdx++;
+    this.bgmTimer = setTimeout(()=>this._playBgmStep(), this.BGM_STEP_MS);
+  },
+
   speak(text){
     if(!this.enabled) return;
     const doSpeak = ()=>{
@@ -751,23 +787,27 @@ const Game = {
     this.lastT = performance.now();
     if(this.rafId) cancelAnimationFrame(this.rafId);
     this.loop(this.lastT);
+    Audio2.startMusic();
   },
 
   pause(){
     if(!this.running) return;
     this.paused=true;
     document.getElementById('ovPause').classList.add('on');
+    Audio2.stopMusic();
   },
   resume(){
     this.paused=false;
     document.getElementById('ovPause').classList.remove('on');
     this.lastT = performance.now();
+    Audio2.startMusic();
   },
   quitToMenu(){
     this.running=false; this.paused=false;
     if(this.rafId) cancelAnimationFrame(this.rafId);
     document.getElementById('ovPause').classList.remove('on');
     document.getElementById('ovOver').classList.remove('on');
+    Audio2.stopMusic();
     UI.go('scMenu');
   },
 
@@ -895,6 +935,7 @@ const Game = {
   endGame(){
     this.running=false;
     if(this.rafId) cancelAnimationFrame(this.rafId);
+    Audio2.stopMusic();
     let isNew=false;
     if(this.score>this.highScore){ this.highScore=this.score; isNew=true; }
     document.getElementById('ovScore').textContent=this.score;
@@ -1013,7 +1054,7 @@ const Game = {
     ctx.fillStyle='rgba(255,93,162,.07)'; ctx.fillRect(0,0,10,H);
     ctx.fillStyle='rgba(0,229,255,.07)'; ctx.fillRect(W-10,0,10,H);
 
-    // equation cargo pods
+    // equation space-crystals — angular asteroid-chunk silhouette, still color-coded by operation
     const opColors = {add:'#3ddc84',sub:'#4ea8ff',mul:'#ff9f45',div:'#ff5da2'};
     const opSym = {add:'+',sub:'−',mul:'×',div:'÷'};
     for(const b of this.blocks){
@@ -1021,10 +1062,13 @@ const Game = {
       ctx.save();
       ctx.translate(b.x, b.y);
       ctx.fillStyle = opColors[b.eq.op];
-      roundRect(ctx,-b.w/2,-b.h/2,b.w,b.h,14);
+      rockPath(ctx,b.w/2,b.h/2);
       ctx.fill();
-      ctx.strokeStyle='rgba(255,255,255,.5)'; ctx.lineWidth=2;
-      roundRect(ctx,-b.w/2,-b.h/2,b.w,b.h,14); ctx.stroke();
+      ctx.strokeStyle='rgba(255,255,255,.55)'; ctx.lineWidth=2;
+      rockPath(ctx,b.w/2,b.h/2); ctx.stroke();
+      // subtle crystal facet highlight along the top-left edge for a faceted-rock sheen
+      ctx.strokeStyle='rgba(255,255,255,.3)'; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(-b.w*0.42,-b.h*0.28); ctx.lineTo(-b.w*0.08,-b.h*0.5); ctx.stroke();
 
       // draw operands + operator with DIFFERENT fonts so + and ÷ can never be confused
       const leftStr=String(b.eq.a), rightStr=String(b.eq.b), sym=opSym[b.eq.op];
@@ -1086,6 +1130,25 @@ function roundRect(ctx,x,y,w,h,r){
   ctx.arcTo(x+w,y+h,x,y+h,r);
   ctx.arcTo(x,y+h,x,y,r);
   ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+/* asymmetric faceted space-crystal / asteroid-chunk silhouette for equation blocks.
+   Fixed proportions (not randomized) so every block stays equally readable —
+   only the outline is jagged; the operation-color fill and text logic are unchanged. */
+function rockPath(ctx,hw,hh){
+  const pts = [
+    [-hw*0.5,  -hh*1.05],
+    [ hw*0.3,  -hh*1.12],
+    [ hw*1.06, -hh*0.42],
+    [ hw*0.96,  hh*0.38],
+    [ hw*0.42,  hh*1.1 ],
+    [-hw*0.4,   hh*1.0 ],
+    [-hw*1.1,   hh*0.3 ],
+    [-hw*0.98, -hh*0.4 ],
+  ];
+  ctx.beginPath();
+  pts.forEach(([px,py],i)=> i===0?ctx.moveTo(px,py):ctx.lineTo(px,py));
   ctx.closePath();
 }
 
